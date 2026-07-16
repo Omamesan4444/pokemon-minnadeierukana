@@ -87,10 +87,8 @@ body {
 }
 
 .me {
-  background: linear-gradient(45deg, #ffeb3b, #ff9800);
-  font-weight: bold;
-  border: 2px solid #ff5722;
-  transform: scale(1.1);
+    border:3px solid white;
+    transform:scale(1.1);
 }
 
 #log {
@@ -166,6 +164,18 @@ body {
   margin: 10px;
   padding: 8px;
 }
+
+.guide {
+  margin: 15px 0;
+  padding: 12px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 </style>
 </head>
 
@@ -174,6 +184,21 @@ body {
 <div id="loginScreen">
   <div class="login-box">
     <h2>みんなでポケモン言えるかな</h2>
+
+
+  <div class="guide">
+    <b>遊び方</b><br>
+     ・ニックネームと部屋IDを入力して参加します。<br>
+    ・誰かが部屋を作成し、その部屋IDを共有してください。<br>
+    ・ホストが「スタート」を押すとゲーム開始！<br>
+    ・ポケモン名を入力して送信すると早い者勝ちで獲得できます。<br>
+    ・獲得したポケモンはプレイヤーごとの色で表示されます。
+  </div>
+
+
+
+
+
     <input id="playerName" placeholder="ニックネーム">
     <input id="roomId" placeholder="部屋ID">
     <button onclick="login()">参加</button>
@@ -267,6 +292,15 @@ function addLog(text) {
 // 👑 ホスト情報受信（これが重要）
 socket.on("roomInfo", (data) => {
   currentHostId = data.hostId;
+
+  document.getElementById("genSelect").disabled =
+    socket.id !== currentHostId;
+});
+
+
+// ←ここに追加
+socket.on("systemMessage", (data) => {
+  addLog("📢 " + data.text);
 });
 
 window.onload = () => {
@@ -339,33 +373,55 @@ function login() {
 }
 
 function showCountdown(callback) {
+
   const el = document.getElementById("countdown");
 
-  let count = 3;
-  el.style.display = "block";
+  // 前回の状態をリセット
+  el.style.display = "none";
+  el.innerText = "";
 
-  const interval = setInterval(() => {
-    if (count > 0) {
-      el.innerText = count;
-      popSound.play();
-    } else {
-      el.innerText = "GO!";
-      startSound.currentTime = 0;
-      startSound.play();
+  // 少し待ってから表示
+  setTimeout(() => {
 
-      if (socket.id === currentHostId) {
-        socket.emit("beginGame");
+    let count = 3;
+
+    el.style.display = "block";
+    el.innerText = count;
+
+    const interval = setInterval(() => {
+
+      count--;
+
+      if (count > 0) {
+
+        el.innerText = count;
+        popSound.currentTime = 0;
+        popSound.play();
+
+      } else if (count === 0) {
+
+        el.innerText = "GO!";
+        startSound.currentTime = 0;
+        startSound.play();
+
+        if (socket.id === currentHostId) {
+          socket.emit("beginGame");
+        }
+
+      } else {
+
+        clearInterval(interval);
+
+        el.style.display = "none";
+        el.innerText = "";
+
+        callback();
       }
-    }
 
-    count--;
+    },1000);
 
-    if (count < 0) {
-      clearInterval(interval);
-      el.style.display = "none";
-      callback();
-    }
-  }, 1000);
+  },50);
+
 }
 
 socket.on("updatePlayers", (players) => {
@@ -443,40 +499,28 @@ if (localPokemon) {
     img.style.display = "block";
     cell.style.backgroundColor = getPokemonColor(p);
 
-cell.style.backgroundColor = getPokemonColor(p);
-
 updateRemaining();
-
-    updateRemaining();
   }
+});
+
+socket.on("regionChanged", (data) => {
+
+  currentData = data.currentData;
+  answered = data.answered;
+
+  createGrid();
+  updateRemaining();
+
+  document.getElementById("timer").innerText = data.time;
+  isPlaying = data.isPlaying;
+
 });
 
 socket.on("sync", (data) => {
   currentData = data.currentData;
   answered = data.answered;
 
-  createGrid();
-
-  answered.forEach(id => {
-    const p = currentData.find(x => x.id === id);
-    if (!p) return;
-
-    const cell = document.getElementById("poke-" + p.id);
-    if (!cell) return;
-
-    const img = cell.querySelector("img");
-    img.style.display = "block";
-    cell.style.backgroundColor = getPokemonColor(p);
-
-    if (!cell.querySelector(".name")) {
-      const name = document.createElement("div");
-      name.className = "name";
-      name.innerText = p.name;
-      name.style.fontSize = "10px";
-      cell.appendChild(name);
-    }
-  });
-
+ 
   updateRemaining();
 
   isPlaying = data.isPlaying;
@@ -489,17 +533,22 @@ socket.on("time", (t) => {
 
 socket.on("begin", () => {
   isPlaying = true;
+
+  document.getElementById("genSelect").disabled = true;
 });
 
 socket.on("end", () => {
   isPlaying = false;
+
+  document.getElementById("genSelect").disabled = false;
+
   showAnswers();
 });
 
 function giveUp() {
   socket.emit("giveUp");
-  isPlaying = false;
-  showAnswers();
+
+  // showAnswers()は呼ばない
 }
 
 function showAnswers() {
@@ -558,6 +607,39 @@ function getPokemonColor(pokemon) {
 }
 
 createGrid();
+
+answered.forEach(id => {
+    const p = currentData.find(x => x.id === id);
+    if (!p) return;
+
+    const cell = document.getElementById("poke-" + id);
+
+    cell.querySelector("img").style.display = "block";
+    cell.style.backgroundColor = getPokemonColor(p);
+
+    const name = document.createElement("div");
+    name.className = "name";
+    name.innerText = p.name;
+    name.style.fontSize = "10px";
+
+    cell.appendChild(name);
+});
+
+document.getElementById("genSelect").addEventListener("change", () => {
+
+    const gen = document.getElementById("genSelect").value;
+
+    currentData = POKEMON_DATA[gen];
+    answered = [];
+
+    createGrid();
+    updateRemaining();
+
+    if (socket.id === currentHostId) {
+        socket.emit("changeRegion", { gen });
+    }
+
+});
 
 document.getElementById("input").addEventListener("keydown", function(e) {
   if (e.key === "Enter") {

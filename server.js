@@ -22,11 +22,14 @@ function createRoom(roomId, hostId) {
     hostId,
     players: {},
     game: {
-      isPlaying: false,
-      time: 900,
-      answered: [],
-      currentData: []
-    }
+  isPlaying: false,
+  time: 900,
+  answered: [],
+  currentData: POKEMON_DATA.kanto.map(p => ({
+    ...p,
+    owner: null
+  }))
+}
   };
 }
 
@@ -64,6 +67,37 @@ io.on("connection", (socket) => {
       time: room.game.time
     });
   });
+
+socket.on("changeRegion", ({ gen }) => {
+  const room = rooms[socket.roomId];
+  if (!room) return;
+
+  // ホスト以外は変更できない
+  if (socket.id !== room.hostId) return;
+
+  room.game.currentData = POKEMON_DATA[gen].map(p => ({
+    ...p,
+    owner: null
+  }));
+
+  room.game.answered = [];
+  room.game.time = 900;
+room.game.isPlaying = false;
+
+  Object.values(room.players).forEach(p=>{
+    p.score=0;
+});
+
+io.to(socket.roomId).emit("updatePlayers",room.players);
+
+io.to(socket.roomId).emit("regionChanged", {
+  currentData: room.game.currentData,
+  answered: room.game.answered,
+  time: room.game.time,
+  isPlaying: room.game.isPlaying
+});
+  io.to(socket.roomId).emit("time", room.game.time);
+});
 
   socket.on("start", ({ gen }) => {
     const room = rooms[socket.roomId];
@@ -105,7 +139,9 @@ io.on("connection", (socket) => {
     if (socket.id !== room.hostId) return;
 
     room.game.isPlaying = false;
-    io.to(socket.roomId).emit("end");
+room.game.time = 900;
+
+io.to(socket.roomId).emit("end");
   });
 
   socket.on("answer", ({ text }) => {
@@ -120,15 +156,22 @@ io.on("connection", (socket) => {
     if (!found) return;
     if (room.game.answered.includes(found.id)) return;
 
-   room.game.answered.push(found.id);
+  room.game.answered.push(found.id);
 room.players[socket.id].score++;
 
 found.owner = socket.id;
 
-    io.to(socket.roomId).emit("correct", {
-      pokemon: found,
-      player: room.players[socket.id]
-    });
+io.to(socket.roomId).emit("correct", {
+    pokemon: found,
+    player: room.players[socket.id]
+});
+
+if (room.game.answered.length === room.game.currentData.length) {
+    room.game.isPlaying = false;
+    io.to(socket.roomId).emit("end");
+}
+
+io.to(socket.roomId).emit("updatePlayers", room.players);
 
 
 
@@ -141,6 +184,11 @@ found.owner = socket.id;
 
     delete room.players[socket.id];
 
+    if(Object.keys(room.players).length===0){
+    delete rooms[socket.roomId];
+    return;
+}
+
     if (socket.id === room.hostId) {
       const ids = Object.keys(room.players);
       room.hostId = ids[0] || null;
@@ -148,6 +196,11 @@ found.owner = socket.id;
       io.to(socket.roomId).emit("roomInfo", {
         hostId: room.hostId
       });
+      if (room.hostId) {
+  io.to(socket.roomId).emit("systemMessage", {
+    text: `${room.players[room.hostId].name} が新しいホストになりました！`
+  });
+}
     }
 
     io.to(socket.roomId).emit("updatePlayers", room.players);
