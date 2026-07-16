@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+h1 {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  margin: 0;
+  font-size: 20px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#controls {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 60px;
+}
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(20, 80px);
+  margin-top: 20px;
+}
+
+#grid div {
+  border: 1px solid #ccc;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-direction: column;
+}
+
+#grid span {
+  position: absolute;
+  font-size: 12px;
+  top: 2px;
+  left: 2px;
+}
+
+#grid img {
+  max-height: 65px;
+  display: none;
+}
+
+.miss {
+  color: red;
+  font-size: 10px;
+}
+
+.correct-anim {
+  animation: pop 0.25s ease;
+  background-color: #aaffaa;
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+#players {
+  display: flex;
+  gap: 15px;
+  margin-top: 10px;
+}
+
+#players div {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #eee;
+}
+
+.me {
+  background: linear-gradient(45deg, #ffeb3b, #ff9800);
+  font-weight: bold;
+  border: 2px solid #ff5722;
+  transform: scale(1.1);
+}
+
+#log {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+
+  width: 220px;
+  max-height: 120px;
+
+  overflow-y: auto;
+
+  background: rgba(0, 0, 0, 0.7); /* 半透明 */
+  color: rgb(255, 255, 255);
+
+  padding: 6px;
+  border-radius: 8px;
+
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.2;
+
+  z-index: 9999;
+}
+
+/* 各ログ行 */
+#log div {
+  margin: 0;
+  padding: 0;
+}
+
+#countdown {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 100px;
+  font-weight: bold;
+  color: red;
+  display: none;
+  z-index: 9999;
+}
+
+#loginScreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #eee;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.login-box {
+  background: white;
+  padding: 30px;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+#players div {
+  padding: 5px 10px;
+  border-radius: 8px;
+  color: white;
+  font-weight: bold;
+}
+
+.login-box input {
+  margin: 10px;
+  padding: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <h2>みんなでポケモン言えるかな</h2>
+    <input id="playerName" placeholder="ニックネーム">
+    <input id="roomId" placeholder="部屋ID">
+    <button onclick="login()">参加</button>
+    <button onclick="createRoomUI()">部屋作成</button>
+  </div>
+</div>
+
+<h1>みんなでポケモン言えるかな</h1>
+
+
+<div id="countdown"></div>
+<div id="players"></div>
+<div id="log"></div>
+
+<div id="controls">
+   <span id="roomDisplay"></span>
+
+
+   
+  <select id="genSelect">
+    <option value="kanto">カントー</option>
+    <option value="johto">ジョウト</option>
+    <option value="hoenn">ホウエン</option>
+    <option value="sinnoh">シンオウ</option>
+    <option value="unova">イッシュ</option>
+    <option value="kalos">カロス</option>
+    <option value="alola">アローラ</option>
+    <option value="galar">ガラル</option>
+    <option value="paldea">パルデア</option>
+  </select>
+
+  時間: <span id="timer">0</span>
+  残り: <span id="remaining">0</span>
+
+  <button onclick="startGame()">スタート</button>
+  <button onclick="giveUp()">ギブ</button>
+
+  <input id="input">
+  <button onclick="send()">送信</button>
+</div>
+
+<div id="grid"></div>
+
+<script src="pokemon.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+
+</body>
+</html>
+
+<script>
+
+const socket = io(); // ← これを一番上に！！
+
+const PLAYER_COLORS = [
+  "#ff4d4d", // 1P 赤
+  "#00cc66", // 2P 緑
+  "#3399ff", // 3P 青
+  "#ffcc00",  // 4P 黄
+  "#FFD700", //5P　金
+  "#C0C0C0", //6p　銀
+];
+
+const playerColorMap = {};
+
+let currentHostId = null;
+let myName = "";
+let currentData = POKEMON_DATA.kanto;
+let answered = [];
+let isPlaying = false;
+
+
+const popSound = new Audio("sounds/pop.mp3");
+const startSound = new Audio("sounds/start.mp3");
+
+function addLog(text) {
+  const log = document.getElementById("log");
+
+  const line = document.createElement("div");
+  line.innerText = text;
+
+  log.prepend(line);
+
+  // 最大10件まで
+  while (log.children.length > 10) {
+    log.removeChild(log.lastChild);
+  }
+}
+
+
+
+// 👑 ホスト情報受信（これが重要）
+socket.on("roomInfo", (data) => {
+  currentHostId = data.hostId;
+});
+
+window.onload = () => {
+  const params = new URLSearchParams(window.location.search);
+  const room = params.get("room");
+
+  if (room) {
+    document.getElementById("roomId").value = room;
+    document.getElementById("roomDisplay").innerText =
+      "部屋ID: " + room;
+  }
+};
+
+socket.on("start", (game) => {
+  currentHostId = game.hostId;
+
+  // 🔥 これ追加（超重要）
+  currentData = game.currentData;
+
+  const startBtn = document.querySelector("button[onclick='startGame()']");
+  startBtn.disabled = socket.id !== currentHostId;
+
+  isPlaying = false;
+
+  showCountdown(() => {
+    answered = [];
+    createGrid();
+    updateRemaining();
+  });
+
+});
+
+function createRoomUI() {
+  const roomId = Math.random().toString(36).slice(2, 6);
+
+  document.getElementById("roomId").value = roomId;
+  document.getElementById("roomDisplay").innerText =
+    "部屋ID: " + roomId;
+
+  const url = `${location.origin}?room=${roomId}`;
+  window.history.replaceState(null, "", url);
+
+  navigator.clipboard.writeText(url).catch(() => {
+    console.log("コピー失敗");
+  });
+
+  alert("部屋を作成しました！\n" + url);
+}
+
+function login() {
+  const name = document.getElementById("playerName").value;
+  const roomId = document.getElementById("roomId").value;
+
+  if (!name || !roomId) {
+    alert("名前と部屋IDを入力して");
+    return;
+  }
+
+  myName = name;
+
+  socket.emit("joinRoom", {
+    name,
+    roomId
+  });
+
+  document.getElementById("roomDisplay").innerText =
+    "部屋ID: " + roomId;
+
+  document.getElementById("loginScreen").style.display = "none";
+}
+
+function showCountdown(callback) {
+  const el = document.getElementById("countdown");
+
+  let count = 3;
+  el.style.display = "block";
+
+  const interval = setInterval(() => {
+    if (count > 0) {
+      el.innerText = count;
+      popSound.play();
+    } else {
+      el.innerText = "GO!";
+      startSound.currentTime = 0;
+      startSound.play();
+
+      if (socket.id === currentHostId) {
+        socket.emit("beginGame");
+      }
+    }
+
+    count--;
+
+    if (count < 0) {
+      clearInterval(interval);
+      el.style.display = "none";
+      callback();
+    }
+  }, 1000);
+}
+
+socket.on("updatePlayers", (players) => {
+  const div = document.getElementById("players");
+  div.innerHTML = "";
+
+  Object.entries(players).forEach(([id, p], index) => {
+    const el = document.createElement("div");
+playerColorMap[id] = PLAYER_COLORS[index] || "#888";
+    let text = p.name + "：" + p.score;
+
+    if (id === currentHostId) {
+      text = "👑 " + text; // ← ここで王冠つく
+    }
+
+    el.innerText = text;
+
+    el.style.background = getPlayerColor(id);
+el.style.color = "white";
+
+    if (id === socket.id) {
+      el.classList.add("me");
+    }
+
+    div.appendChild(el);
+  });
+});
+
+function startGame() {
+  const gen = document.getElementById("genSelect").value;
+  socket.emit("start", { gen });
+}
+
+function send() {
+  if (!isPlaying) return;
+  if (!myName) return;
+
+  const input = document.getElementById("input").value;
+
+  socket.emit("answer", { text: input });
+
+  document.getElementById("input").value = "";
+}
+
+socket.on("correct", (data) => {
+  const p = data.pokemon;
+  const player = data.player;
+const localPokemon = currentData.find(x => x.id === p.id);
+
+if (localPokemon) {
+  localPokemon.owner = p.owner;
+}
+  addLog(player.name + " が " + p.name + "！");
+
+  if (!answered.includes(p.id)) {
+    answered.push(p.id);
+
+    const cell = document.getElementById("poke-" + p.id);
+    if (!cell) return;
+
+    cell.classList.add("correct-anim");
+
+    popSound.play();
+
+    const img = cell.querySelector("img");
+
+    if (!cell.querySelector(".name")) {
+      const name = document.createElement("div");
+      name.className = "name";
+      name.innerText = p.name;
+      name.style.fontSize = "10px";
+      cell.appendChild(name);
+    }
+
+    img.style.display = "block";
+    cell.style.backgroundColor = getPokemonColor(p);
+
+cell.style.backgroundColor = getPokemonColor(p);
+
+updateRemaining();
+
+    updateRemaining();
+  }
+});
+
+socket.on("sync", (data) => {
+  currentData = data.currentData;
+  answered = data.answered;
+
+  createGrid();
+
+  answered.forEach(id => {
+    const p = currentData.find(x => x.id === id);
+    if (!p) return;
+
+    const cell = document.getElementById("poke-" + p.id);
+    if (!cell) return;
+
+    const img = cell.querySelector("img");
+    img.style.display = "block";
+    cell.style.backgroundColor = getPokemonColor(p);
+
+    if (!cell.querySelector(".name")) {
+      const name = document.createElement("div");
+      name.className = "name";
+      name.innerText = p.name;
+      name.style.fontSize = "10px";
+      cell.appendChild(name);
+    }
+  });
+
+  updateRemaining();
+
+  isPlaying = data.isPlaying;
+  document.getElementById("timer").innerText = data.time;
+});
+
+socket.on("time", (t) => {
+  document.getElementById("timer").innerText = t;
+});
+
+socket.on("begin", () => {
+  isPlaying = true;
+});
+
+socket.on("end", () => {
+  isPlaying = false;
+  showAnswers();
+});
+
+function giveUp() {
+  socket.emit("giveUp");
+  isPlaying = false;
+  showAnswers();
+}
+
+function showAnswers() {
+  currentData.forEach(p => {
+    if (!answered.includes(p.id)) {
+      const cell = document.getElementById("poke-" + p.id);
+      const name = document.createElement("div");
+      name.className = "miss";
+      name.innerText = p.name;
+      cell.appendChild(name);
+    }
+  });
+}
+
+function createGrid() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+
+  currentData.forEach(p => {
+    const div = document.createElement("div");
+    div.id = "poke-" + p.id;
+
+    const num = document.createElement("span");
+    num.innerText = p.id;
+
+    const img = document.createElement("img");
+    img.src = "images/" + p.id + ".png";
+
+    div.appendChild(num);
+    div.appendChild(img);
+
+    grid.appendChild(div);
+  });
+}
+
+function updateRemaining() {
+  document.getElementById("remaining").innerText =
+    currentData.length - answered.length;
+}
+
+function getPlayerColor(id) {
+  if (!playerColorMap[id]) {
+    const used = Object.keys(playerColorMap).length;
+
+    playerColorMap[id] =
+      PLAYER_COLORS[used % PLAYER_COLORS.length];
+  }
+
+  return playerColorMap[id];
+}
+
+function getPokemonColor(pokemon) {
+  if (!pokemon.owner) return "#444";
+
+  return getPlayerColor(pokemon.owner);
+}
+
+createGrid();
+
+document.getElementById("input").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") {
+    send();
+  }
+});
+
+document.getElementById("playerName").addEventListener("keydown", e => {
+  if (e.key === "Enter") login();
+});
+
+
+
+</script>
