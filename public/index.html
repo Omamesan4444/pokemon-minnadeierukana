@@ -270,9 +270,14 @@ let answered = [];
 let isPlaying = false;
 
 
+const missSound = new Audio("sounds/miss.mp3");
+missSound.volume = 0.25;
+const timeupSound = new Audio("sounds/timeup.mp3");
+timeupSound.volume = 0.4;
 const popSound = new Audio("sounds/pop.mp3");
 const startSound = new Audio("sounds/start.mp3");
-
+popSound.volume = 0.2;
+startSound.volume = 0.3;
 function addLog(text) {
   const log = document.getElementById("log");
 
@@ -287,7 +292,10 @@ function addLog(text) {
   }
 }
 
-
+socket.on("wrong", () => {
+    missSound.currentTime = 0;
+    missSound.play();
+});
 
 // 👑 ホスト情報受信（これが重要）
 socket.on("roomInfo", (data) => {
@@ -376,51 +384,43 @@ function showCountdown(callback) {
 
   const el = document.getElementById("countdown");
 
-  // 前回の状態をリセット
-  el.style.display = "none";
-  el.innerText = "";
+ let count = 2;
 
-  // 少し待ってから表示
-  setTimeout(() => {
+el.innerText = "3";
+popSound.currentTime = 0;
+popSound.play();
 
-    let count = 3;
+  el.style.display = "block";
 
-    el.style.display = "block";
-    el.innerText = count;
+  const interval = setInterval(() => {
 
-    const interval = setInterval(() => {
+    if (count > 0) {
 
-      count--;
+      el.innerText = count;
+      popSound.currentTime = 0;
+      popSound.play();
 
-      if (count > 0) {
+    } else if (count === 0) {
 
-        el.innerText = count;
-        popSound.currentTime = 0;
-        popSound.play();
+      el.innerText = "GO!";
+      startSound.currentTime = 0;
+      startSound.play();
 
-      } else if (count === 0) {
-
-        el.innerText = "GO!";
-        startSound.currentTime = 0;
-        startSound.play();
-
-        if (socket.id === currentHostId) {
-          socket.emit("beginGame");
-        }
-
-      } else {
-
-        clearInterval(interval);
-
-        el.style.display = "none";
-        el.innerText = "";
-
-        callback();
+      if (socket.id === currentHostId) {
+        socket.emit("beginGame");
       }
 
-    },1000);
+    } else {
 
-  },50);
+      clearInterval(interval);
+      el.style.display = "none";
+      callback();
+
+    }
+
+    count--;
+
+  }, 1000);
 
 }
 
@@ -480,9 +480,11 @@ if (localPokemon) {
     answered.push(p.id);
 
     const cell = document.getElementById("poke-" + p.id);
-    if (!cell) return;
+  
 
-    cell.classList.add("correct-anim");
+    cell.classList.remove("correct-anim");
+void cell.offsetWidth;
+cell.classList.add("correct-anim");
 
     popSound.play();
 
@@ -503,28 +505,45 @@ updateRemaining();
   }
 });
 
-socket.on("regionChanged", (data) => {
+socket.on("regionChanged",(data)=>{
 
-  currentData = data.currentData;
-  answered = data.answered;
+    currentData = data.currentData;
+    answered = [];
 
-  createGrid();
-  updateRemaining();
+    createGrid();
+    updateRemaining();
 
-  document.getElementById("timer").innerText = data.time;
-  isPlaying = data.isPlaying;
-
+    document.getElementById("timer").innerText = data.time;
+    isPlaying = data.isPlaying;
 });
 
 socket.on("sync", (data) => {
-  currentData = data.currentData;
-  answered = data.answered;
+    currentData = data.currentData;
+    answered = data.answered;
 
- 
-  updateRemaining();
+    createGrid();
 
-  isPlaying = data.isPlaying;
-  document.getElementById("timer").innerText = data.time;
+    answered.forEach(id => {
+        const p = currentData.find(x => x.id === id);
+        if (!p) return;
+
+        const cell = document.getElementById("poke-" + p.id);
+
+        cell.querySelector("img").style.display = "block";
+        cell.style.backgroundColor = getPokemonColor(p);
+
+        const name = document.createElement("div");
+        name.className = "name";
+        name.innerText = p.name;
+        name.style.fontSize = "10px";
+
+        cell.appendChild(name);
+    });
+
+    updateRemaining();
+
+    isPlaying = data.isPlaying;
+    document.getElementById("timer").innerText = data.time;
 });
 
 socket.on("time", (t) => {
@@ -538,6 +557,8 @@ socket.on("begin", () => {
 });
 
 socket.on("end", () => {
+  timeupSound.currentTime = 0;
+timeupSound.play();
   isPlaying = false;
 
   document.getElementById("genSelect").disabled = false;
@@ -552,15 +573,24 @@ function giveUp() {
 }
 
 function showAnswers() {
-  currentData.forEach(p => {
-    if (!answered.includes(p.id)) {
-      const cell = document.getElementById("poke-" + p.id);
-      const name = document.createElement("div");
-      name.className = "miss";
-      name.innerText = p.name;
-      cell.appendChild(name);
-    }
-  });
+
+    currentData.forEach(p => {
+
+        if (!answered.includes(p.id)) {
+
+            const cell = document.getElementById("poke-" + p.id);
+
+            if (cell.querySelector(".miss")) return;
+
+            const name = document.createElement("div");
+            name.className = "miss";
+            name.innerText = p.name;
+
+            cell.appendChild(name);
+        }
+
+    });
+
 }
 
 function createGrid() {

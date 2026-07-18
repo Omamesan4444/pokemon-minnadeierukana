@@ -117,9 +117,9 @@ io.to(socket.roomId).emit("regionChanged", {
     io.to(socket.roomId).emit("start", {
       ...room.game,
       hostId: room.hostId
+      
     });
-
-    io.to(socket.roomId).emit("updatePlayers", room.players);
+io.to(socket.roomId).emit("updatePlayers", room.players);
   });
 
   socket.on("beginGame", () => {
@@ -133,50 +133,54 @@ io.to(socket.roomId).emit("regionChanged", {
     io.to(socket.roomId).emit("time", room.game.time);
   });
 
-  socket.on("giveUp", () => {
+
+
+socket.on("giveUp", () => {
     const room = rooms[socket.roomId];
     if (!room) return;
     if (socket.id !== room.hostId) return;
 
     room.game.isPlaying = false;
-room.game.time = 900;
+    room.game.time = 900;
 
-io.to(socket.roomId).emit("end");
-  });
+    io.to(socket.roomId).emit("time", room.game.time);
+    io.to(socket.roomId).emit("end");
+});
 
-  socket.on("answer", ({ text }) => {
+socket.on("answer", ({ text }) => {
     const room = rooms[socket.roomId];
     if (!room) return;
     if (!room.game.isPlaying) return;
 
     const found = room.game.currentData.find(
-      p => normalize(p.name) === normalize(text)
+        p => normalize(p.name) === normalize(text)
     );
 
-    if (!found) return;
+    if (!found) {
+        socket.emit("wrong");
+        return;
+    }
+
     if (room.game.answered.includes(found.id)) return;
 
-  room.game.answered.push(found.id);
-room.players[socket.id].score++;
+    room.game.answered.push(found.id);
+    room.players[socket.id].score++;
+    found.owner = socket.id;
 
-found.owner = socket.id;
-
-io.to(socket.roomId).emit("correct", {
-    pokemon: found,
-    player: room.players[socket.id]
-});
-
-if (room.game.answered.length === room.game.currentData.length) {
-    room.game.isPlaying = false;
-    io.to(socket.roomId).emit("end");
-}
-
-io.to(socket.roomId).emit("updatePlayers", room.players);
-
-
+    io.to(socket.roomId).emit("correct", {
+        pokemon: found,
+        player: room.players[socket.id]
+    });
 
     io.to(socket.roomId).emit("updatePlayers", room.players);
-  });
+
+    if (room.game.answered.length === room.game.currentData.length) {
+        room.game.isPlaying = false;
+        io.to(socket.roomId).emit("end");
+    }
+});
+
+
 
   socket.on("disconnect", () => {
     const room = rooms[socket.roomId];
@@ -205,21 +209,26 @@ io.to(socket.roomId).emit("updatePlayers", room.players);
 
     io.to(socket.roomId).emit("updatePlayers", room.players);
   });
-
 });
+
+
 
 setInterval(() => {
   Object.entries(rooms).forEach(([roomId, room]) => {
     if (!room.game.isPlaying) return;
 
-    room.game.time--;
+  room.game.time--;
 
-    if (room.game.time <= 0) {
-      room.game.isPlaying = false;
-      io.to(roomId).emit("end");
-    } else {
-      io.to(roomId).emit("time", room.game.time);
-    }
+if (room.game.time < 0) {
+    room.game.time = 0;
+}
+
+io.to(roomId).emit("time", room.game.time);
+
+if (room.game.time === 0) {
+    room.game.isPlaying = false;
+    io.to(roomId).emit("end");
+}
   });
 }, 1000);
 
