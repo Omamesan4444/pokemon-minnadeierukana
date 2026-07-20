@@ -49,15 +49,19 @@ io.on("connection", (socket) => {
     socket.roomId = roomId;
 
     room.players[socket.id] = {
-      name,
-      score: 0
-    };
+  name,
+  score: 0,
+  ready: false
+};
 
     io.to(roomId).emit("roomInfo", {
       hostId: room.hostId
     });
 
     io.to(roomId).emit("updatePlayers", room.players);
+
+
+ 
 
     // 🔥 途中参加者に現在の状態送る
     socket.emit("sync", {
@@ -66,6 +70,12 @@ io.on("connection", (socket) => {
       isPlaying: room.game.isPlaying,
       time: room.game.time
     });
+
+    const allReady = Object.values(room.players).every(p => p.ready);
+
+io.to(roomId).emit("readyStatus", {
+    allReady
+});
   });
 
 socket.on("changeRegion", ({ gen }) => {
@@ -84,11 +94,18 @@ socket.on("changeRegion", ({ gen }) => {
   room.game.time = 900;
 room.game.isPlaying = false;
 
-  Object.values(room.players).forEach(p=>{
-    p.score=0;
+Object.values(room.players).forEach(p=>{
+    p.score = 0;
+    p.ready = false;
 });
 
 io.to(socket.roomId).emit("updatePlayers",room.players);
+const allReady = Object.values(room.players).every(p => p.ready);
+
+io.to(socket.roomId).emit("readyStatus", {
+    allReady
+});
+
 
 io.to(socket.roomId).emit("regionChanged", {
   currentData: room.game.currentData,
@@ -104,6 +121,15 @@ io.to(socket.roomId).emit("regionChanged", {
     if (!room) return;
     if (socket.id !== room.hostId) return;
 
+    const allReady = Object.values(room.players).every(p => p.ready);
+
+if (!allReady) {
+    socket.emit("systemMessage", {
+        text: "⚠ 全員が準備OKになるまで開始できません"
+    });
+    return;
+}
+
     room.game.currentData = POKEMON_DATA[gen].map(p => ({
   ...p,
   owner: null
@@ -112,7 +138,10 @@ io.to(socket.roomId).emit("regionChanged", {
     room.game.time = 900;
     room.game.isPlaying = false;
 
-    Object.values(room.players).forEach(p => p.score = 0);
+    Object.values(room.players).forEach(p => {
+    p.score = 0;
+    p.ready = false;
+});
 
     io.to(socket.roomId).emit("start", {
       ...room.game,
@@ -120,6 +149,10 @@ io.to(socket.roomId).emit("regionChanged", {
       
     });
 io.to(socket.roomId).emit("updatePlayers", room.players);
+
+io.to(socket.roomId).emit("readyStatus", {
+    allReady: false
+});
   });
 
   socket.on("beginGame", () => {
@@ -130,10 +163,31 @@ io.to(socket.roomId).emit("updatePlayers", room.players);
     room.game.isPlaying = true;
 
     io.to(socket.roomId).emit("begin");
+    
     io.to(socket.roomId).emit("time", room.game.time);
+    io.to(socket.roomId).emit("updatePlayers", room.players);
   });
 
+socket.on("ready", () => {
 
+    const room = rooms[socket.roomId];
+    if (!room) return;
+
+    room.players[socket.id].ready =
+        !room.players[socket.id].ready;
+
+    io.to(socket.roomId).emit(
+        "updatePlayers",
+        room.players
+    );
+    const allReady = Object.values(room.players)
+    .every(p => p.ready);
+
+io.to(socket.roomId).emit("readyStatus", {
+    allReady
+});
+
+});
 
 socket.on("giveUp", () => {
     const room = rooms[socket.roomId];
@@ -142,7 +196,14 @@ socket.on("giveUp", () => {
 
     room.game.isPlaying = false;
     room.game.time = 900;
+Object.values(room.players).forEach(p=>{
+    p.ready = false;
+});
+io.to(socket.roomId).emit("updatePlayers", room.players);
 
+io.to(socket.roomId).emit("readyStatus",{
+    allReady:false
+});
     io.to(socket.roomId).emit("time", room.game.time);
     io.to(socket.roomId).emit("end");
 });
@@ -173,11 +234,30 @@ socket.on("answer", ({ text }) => {
     });
 
     io.to(socket.roomId).emit("updatePlayers", room.players);
+    const allReady = Object.values(room.players)
+    .every(p => p.ready);
+
+io.to(socket.roomId).emit("readyStatus", {
+    allReady
+});
 
     if (room.game.answered.length === room.game.currentData.length) {
-        room.game.isPlaying = false;
-        io.to(socket.roomId).emit("end");
-    }
+
+    room.game.isPlaying = false;
+
+    const winner = Object.values(room.players)
+        .sort((a, b) => b.score - a.score)[0];
+
+    io.to(socket.roomId).emit("systemMessage", {
+        text: `🏆 ${winner.name} の勝ち！ (${winner.score}匹)`
+    });
+
+    io.to(socket.roomId).emit("systemMessage", {
+        text: "🎉 コンプリート！！"
+    });
+
+    io.to(socket.roomId).emit("end");
+}
 });
 
 

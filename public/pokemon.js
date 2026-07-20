@@ -921,7 +921,7 @@ galar: [
 
   
 ],
-paldea: [
+hisui: [
   { id: 899, name: "アヤシシ", owner: null },
   { id: 900, name: "バサギリ", owner: null },
   { id: 901, name: "ガチグマ", owner: null },
@@ -930,6 +930,8 @@ paldea: [
   { id: 904, name: "ハリーマン", owner: null },
   { id: 905, name: "ラブトロス", owner: null },
 
+  ],
+paldea: [
   { id: 906, name: "ニャオハ", owner: null },
   { id: 907, name: "ニャローテ", owner: null },
   { id: 908, name: "マスカーニャ", owner: null },

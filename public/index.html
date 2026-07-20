@@ -175,6 +175,26 @@ body {
   font-size: 13px;
   line-height: 1.6;
 }
+#copyToast{
+  position:fixed;
+  bottom:30px;
+  left:50%;
+  transform:translateX(-50%);
+  background:#333;
+  color:#fff;
+  padding:12px 20px;
+  border-radius:30px;
+  opacity:0;
+  transition:.3s;
+  pointer-events:none;
+  z-index:99999;
+}
+
+#copyToast.show{
+  opacity:1;
+}
+
+
 
 </style>
 </head>
@@ -227,13 +247,17 @@ body {
     <option value="kalos">カロス</option>
     <option value="alola">アローラ</option>
     <option value="galar">ガラル</option>
+    <option value="hisui">ヒスイ</option>
     <option value="paldea">パルデア</option>
   </select>
 
   時間: <span id="timer">0</span>
   残り: <span id="remaining">0</span>
 
+  状態: <span id="gameStatus">待機中...</span>
+
   <button onclick="startGame()">スタート</button>
+  <button id="readyBtn" onclick="toggleReady()">準備OK</button>
   <button onclick="giveUp()">ギブ</button>
 
   <input id="input">
@@ -241,6 +265,8 @@ body {
 </div>
 
 <div id="grid"></div>
+
+<div id="copyToast">URLをコピーしました！</div>
 
 <script src="pokemon.js"></script>
 <script src="/socket.io/socket.io.js"></script>
@@ -273,7 +299,7 @@ let isPlaying = false;
 const missSound = new Audio("sounds/miss.mp3");
 missSound.volume = 0.25;
 const timeupSound = new Audio("sounds/timeup.mp3");
-timeupSound.volume = 0.4;
+timeupSound.volume = 0.2;
 const popSound = new Audio("sounds/pop.mp3");
 const startSound = new Audio("sounds/start.mp3");
 popSound.volume = 0.2;
@@ -301,8 +327,16 @@ socket.on("wrong", () => {
 socket.on("roomInfo", (data) => {
   currentHostId = data.hostId;
 
-  document.getElementById("genSelect").disabled =
-    socket.id !== currentHostId;
+const isHost = socket.id === currentHostId;
+
+document.querySelector(
+    "button[onclick='startGame()']"
+).disabled = true;
+
+  document.getElementById("genSelect").disabled = !isHost;
+
+  document.querySelector("button[onclick='startGame()']").disabled = !isHost;
+  document.querySelector("button[onclick='giveUp()']").disabled = !isHost;
 });
 
 
@@ -310,6 +344,16 @@ socket.on("roomInfo", (data) => {
 socket.on("systemMessage", (data) => {
   addLog("📢 " + data.text);
 });
+
+function showCopyToast() {
+    const toast = document.getElementById("copyToast");
+
+    toast.classList.add("show");
+
+    setTimeout(() => {
+        toast.classList.remove("show");
+    }, 2000);
+}
 
 window.onload = () => {
   const params = new URLSearchParams(window.location.search);
@@ -328,8 +372,10 @@ socket.on("start", (game) => {
   // 🔥 これ追加（超重要）
   currentData = game.currentData;
 
-  const startBtn = document.querySelector("button[onclick='startGame()']");
-  startBtn.disabled = socket.id !== currentHostId;
+const isHost = socket.id === currentHostId;
+
+document.querySelector("button[onclick='startGame()']").disabled = !isHost;
+document.querySelector("button[onclick='giveUp()']").disabled = !isHost;
 
   isPlaying = false;
 
@@ -348,14 +394,20 @@ function createRoomUI() {
   document.getElementById("roomDisplay").innerText =
     "部屋ID: " + roomId;
 
-  const url = `${location.origin}?room=${roomId}`;
+  const url =
+location.origin +
+location.pathname +
+"?room=" +
+roomId;
   window.history.replaceState(null, "", url);
 
-  navigator.clipboard.writeText(url).catch(() => {
-    console.log("コピー失敗");
-  });
-
-  alert("部屋を作成しました！\n" + url);
+ navigator.clipboard.writeText(url)
+.then(() => {
+    showCopyToast();
+})
+.catch(() => {
+    alert("コピーに失敗しました");
+});
 }
 
 function login() {
@@ -431,8 +483,17 @@ socket.on("updatePlayers", (players) => {
   Object.entries(players).forEach(([id, p], index) => {
     const el = document.createElement("div");
 playerColorMap[id] = PLAYER_COLORS[index] || "#888";
-    let text = p.name + "：" + p.score;
+  let status = "";
 
+if (!isPlaying) {
+    status = p.ready ? " 🟢Ready" : " 🔴待機中";
+}
+
+let text =
+    p.name +
+    "：" +
+    p.score +
+    status;
     if (id === currentHostId) {
       text = "👑 " + text; // ← ここで王冠つく
     }
@@ -445,10 +506,32 @@ el.style.color = "white";
     if (id === socket.id) {
       el.classList.add("me");
     }
+const me = players[socket.id];
 
+if (me) {
+    document.getElementById("readyBtn").innerText =
+        me.ready ? "準備解除" : "準備OK";
+}
     div.appendChild(el);
   });
 });
+
+socket.on("readyStatus", ({ allReady }) => {
+
+    if (isPlaying) return;
+
+    document.getElementById("gameStatus").innerText =
+        allReady ? "✅ Ready!" : "⏳ 待機中";
+
+    // ホストだけスタートボタンを制御
+    if (socket.id === currentHostId) {
+        document.querySelector("button[onclick='startGame()']").disabled = !allReady;
+    }
+});
+
+function toggleReady() {
+    socket.emit("ready");
+}
 
 function startGame() {
   const gen = document.getElementById("genSelect").value;
@@ -554,6 +637,8 @@ socket.on("begin", () => {
   isPlaying = true;
 
   document.getElementById("genSelect").disabled = true;
+document.getElementById("readyBtn").disabled = true;
+  document.getElementById("gameStatus").innerText = "🎮 ゲーム中";
 });
 
 socket.on("end", () => {
@@ -562,7 +647,8 @@ timeupSound.play();
   isPlaying = false;
 
   document.getElementById("genSelect").disabled = false;
-
+  document.getElementById("readyBtn").disabled = false;
+document.getElementById("gameStatus").innerText = "待機中...";
   showAnswers();
 });
 
